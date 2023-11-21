@@ -12,6 +12,7 @@ eval_interval = 300
 learning_rate = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu' # utilize GPU for speed
 eval_iters = 200
+n_embd = 32
 
 torch.manual_seed(1337)
 
@@ -61,15 +62,20 @@ def estimate_loss():
 # Simple Bigram Model
 class BigramLanguageModel(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
-
+        B, T = idx.shape
         # idx and targets are both (B,T) tensor of integers
-        logits = self.token_embedding_table(idx) # (B,T,C)
+        token_embd = self.token_embedding_table(idx) # (B,T,C -> (n_embd))
+        pos_embd = self.position_embedding_table(torch.arange(T, device=device)) # (T,C -> (n_embd))
+        x = token_embd + pos_embd # (B,T,C -> (n_embd))
+        logits = self.lm_head(token_embd) # (B,T,C -> (vocab_size))
 
         if targets is None:
             loss = None
@@ -96,7 +102,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
 
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(device)
 
 # Create a PyTorch optimizer
@@ -135,10 +141,19 @@ x_bow = torch.zeros(B, T, C) # bow = Bag of Words
 for b in range (B):
     for t in range(T):
         x_prev = x[b, :t+1] # (t, C)
-        x_bow[b, t] = torch.mean(x_prev, dim=0)
+        x_bow[b, t] = torch.mean(x_prev, 0)
 
 weight = torch.tril(torch.ones(T, T))
 weight = weight / weight.sum(1, keepdim=True)
-xbow2 = 
+x_bow2 = weight @ x # (B, T, C)
+print(torch.allclose(x_bow, x_bow2))
 
-print(weight)
+#print(weight)
+
+tril = torch.tril(torch.ones(T, T))
+weight = torch.zeros(T, T)
+weight = weight.masked_fill(tril == 0, float ('-inf'))
+weight = F.softmax(weight, dim=-1)
+x_bow3 = weight @ x
+print(torch.allclose(x_bow, x_bow3))
+
